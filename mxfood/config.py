@@ -7,10 +7,39 @@ START_DATE = datetime(2024, 1, 1)
 END_DATE = datetime(2025, 12, 31)
 
 # Entity counts
-NUM_USERS = 10000
+NUM_USERS = 30000
 NUM_RESTAURANTS = 500
 NUM_DRIVERS = 800
 NUM_ZONES = 12
+
+# User activity segments - controls order frequency distribution
+# Target metrics: ~50% ever-order rate, ~20% monthly active rate
+USER_SEGMENTS = {
+    "power_user": {
+        "proportion": 0.05,           # 5% of users
+        "ever_order_rate": 1.0,       # 100% will place at least one order
+        "monthly_active_rate": 0.80,  # 80% order in any given month
+        "orders_per_active_month": (8, 15),  # Orders when active
+    },
+    "regular": {
+        "proportion": 0.15,           # 15% of users
+        "ever_order_rate": 0.95,
+        "monthly_active_rate": 0.50,
+        "orders_per_active_month": (3, 6),
+    },
+    "casual": {
+        "proportion": 0.30,           # 30% of users
+        "ever_order_rate": 0.70,
+        "monthly_active_rate": 0.25,
+        "orders_per_active_month": (1, 3),
+    },
+    "rare": {
+        "proportion": 0.50,           # 50% of users (long tail)
+        "ever_order_rate": 0.25,      # Only 25% ever order
+        "monthly_active_rate": 0.05,  # Very rarely active
+        "orders_per_active_month": (1, 2),
+    },
+}
 
 # Platform distribution
 PLATFORM_DISTRIBUTION = {

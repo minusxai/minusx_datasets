@@ -9,7 +9,7 @@ import sys
 sys.path.append('..')
 from config import (
     NUM_USERS, START_DATE, END_DATE, PLATFORM_DISTRIBUTION,
-    ACQUISITION_CHANNELS, REFERRAL_RATE
+    ACQUISITION_CHANNELS, REFERRAL_RATE, USER_SEGMENTS
 )
 from utils.ids import generate_id
 from utils.names import NameGenerator
@@ -55,6 +55,9 @@ class UserGenerator(BaseGenerator):
         # Track users who can refer others (organic and satisfied users)
         referrers = []
 
+        # Pre-assign segments to users based on proportions
+        segment_assignments = self._assign_user_segments()
+
         for i in range(NUM_USERS):
             user_id = generate_id("usr", i + 1)
             created_at = user_dates[i]
@@ -79,6 +82,11 @@ class UserGenerator(BaseGenerator):
             email = fake.email()
             phone = fake.phone_number()
 
+            # Get segment and determine if user will ever order
+            segment = segment_assignments[i]
+            segment_config = USER_SEGMENTS[segment]
+            will_order = random.random() < segment_config["ever_order_rate"]
+
             user = {
                 "user_id": user_id,
                 "first_name": first_name,
@@ -89,12 +97,14 @@ class UserGenerator(BaseGenerator):
                 "zone_id": zone_id,
                 "acquisition_channel": channel,
                 "referred_by_user_id": referred_by,
-                "platform": platform
+                "platform": platform,
+                "segment": segment,
+                "will_order": will_order
             }
             users.append(user)
 
-            # Some users can become referrers
-            if channel in ["organic", "referral"] and random.random() < REFERRAL_RATE * 3:
+            # Some users can become referrers (only if they will order)
+            if will_order and channel in ["organic", "referral"] and random.random() < REFERRAL_RATE * 3:
                 referrers.append(user_id)
 
         df = pd.DataFrame(users)
@@ -103,6 +113,25 @@ class UserGenerator(BaseGenerator):
             self.data_store.set("users", df)
 
         return df
+
+    def _assign_user_segments(self) -> List[str]:
+        """Assign segments to users based on configured proportions.
+
+        Returns:
+            List of segment names, one per user
+        """
+        segments = []
+        for segment_name, config in USER_SEGMENTS.items():
+            count = int(NUM_USERS * config["proportion"])
+            segments.extend([segment_name] * count)
+
+        # Fill any remainder due to rounding
+        while len(segments) < NUM_USERS:
+            segments.append("rare")  # Default to rare for remainder
+
+        # Shuffle so segments aren't in order
+        random.shuffle(segments)
+        return segments
 
     def _get_zone_ids(self) -> List[str]:
         """Get zone IDs from data store."""

@@ -15,7 +15,7 @@ from config import (
     START_DATE, END_DATE, ORDER_STATUS_WEIGHTS, DELIVERY_FEE_RANGE,
     TIP_PROBABILITIES, PLATFORM_DISTRIBUTION,
     ACQUISITION_CHANNELS, PREMIUM_CHAIN_INTRO_MONTH, PREMIUM_CHAIN_NAME,
-    PREMIUM_CHAIN_CANNIBALIZATION_RATE, RANDOM_SEED
+    PREMIUM_CHAIN_CANNIBALIZATION_RATE, RANDOM_SEED, USER_SEGMENTS
 )
 from utils.ids import generate_id
 from utils.time import TimeUtils
@@ -29,7 +29,7 @@ def _generate_orders_for_day_batch(args):
     """Generate orders for a batch of days. Called by worker processes."""
     (dates, user_data, restaurant_data, restaurant_products,
      zone_delivery_times, driver_ids, premium_intro_date,
-     premium_restaurant_ids, seed_offset) = args
+     premium_restaurant_ids, user_segments, seed_offset) = args
 
     # Set random seed for this worker
     np.random.seed(RANDOM_SEED + seed_offset)
@@ -59,7 +59,7 @@ def _generate_orders_for_day_batch(args):
 
         # Pre-compute user weights
         user_weights = _compute_user_weights_static(
-            eligible_users, user_data, current_date, cohort_model
+            eligible_users, user_data, current_date, cohort_model, user_segments
         )
 
         # Filter eligible restaurants
@@ -71,10 +71,14 @@ def _generate_orders_for_day_batch(args):
         if not eligible_restaurants:
             continue
 
+        # Skip if no eligible users
+        users, weights = user_weights
+        if not users:
+            continue
+
         # Generate orders for the day
         for _ in range(num_orders):
             # Select user
-            users, weights = user_weights
             user_id = np.random.choice(users, p=weights)
             user_info = user_data[user_id]
 
@@ -145,19 +149,46 @@ def _generate_orders_for_day_batch(args):
     return orders, order_items
 
 
-def _compute_user_weights_static(eligible_users, user_data, current_date, cohort_model):
-    """Compute user weights for sampling."""
+def _compute_user_weights_static(eligible_users, user_data, current_date, cohort_model, user_segments):
+    """Compute user weights for sampling based on segments."""
+    filtered_users = []
     weights = []
+
     for user_id in eligible_users:
-        channel = user_data[user_id]["channel"]
+        user = user_data[user_id]
+
+        # Skip users who will never order
+        if not user.get("will_order", True):
+            continue
+
+        # Get segment config
+        segment = user.get("segment", "casual")
+        segment_config = user_segments.get(segment, user_segments["casual"])
+
+        # Check if user is active this month (simplified: use monthly_active_rate as probability)
+        # We apply this probabilistically per-order selection
+        monthly_active_rate = segment_config["monthly_active_rate"]
+
+        # Base weight from segment's order frequency
+        min_orders, max_orders = segment_config["orders_per_active_month"]
+        avg_orders = (min_orders + max_orders) / 2
+
+        # Weight = monthly_active_rate * avg_orders_per_month * channel_multiplier
+        channel = user["channel"]
         freq_mult = cohort_model.get_order_frequency_multiplier(channel)
-        days_since_signup = (current_date - user_data[user_id]["created_at"]).days
+        days_since_signup = (current_date - user["created_at"]).days
         tenure_mult = min(2.0, 1.0 + days_since_signup / 180)
-        weights.append(freq_mult * tenure_mult)
+
+        weight = monthly_active_rate * avg_orders * freq_mult * tenure_mult
+        filtered_users.append(user_id)
+        weights.append(weight)
+
+    if not filtered_users:
+        return ([], [])
 
     weights = np.array(weights)
     weights = weights / weights.sum()
-    return (eligible_users, weights)
+    return (filtered_users, weights)
 
 
 def _select_restaurant_static(eligible_restaurants, date, user_zone,
@@ -289,7 +320,7 @@ class OrderGenerator(BaseGenerator):
         batch_args = [
             (batch, user_data, restaurant_data, restaurant_products,
              zone_delivery_times, driver_ids, premium_intro_date,
-             premium_restaurant_ids, idx)
+             premium_restaurant_ids, USER_SEGMENTS, idx)
             for idx, batch in enumerate(date_batches)
         ]
 
@@ -337,7 +368,9 @@ class OrderGenerator(BaseGenerator):
                 "created_at": row["created_at_dt"].to_pydatetime(),
                 "zone_id": row["zone_id"],
                 "channel": row["acquisition_channel"],
-                "platform": row["platform"]
+                "platform": row["platform"],
+                "segment": row.get("segment", "casual"),
+                "will_order": row.get("will_order", True)
             }
             for _, row in users_df.iterrows()
         }
