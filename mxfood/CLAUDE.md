@@ -23,15 +23,27 @@ uv run python import_to_duckdb.py --overwrite  # replace existing db
 ```
 
 ## Configuration Parameters
-- **Users**: ~10,000
+- **Users**: ~30,000
 - **Restaurants**: ~500
 - **Drivers**: ~800
-- **Timeline**: 2 years (2023-01-01 to 2024-12-31)
+- **Timeline**: 2 years (2024-01-01 to 2025-12-31)
 - **Geography**: Single city with 12 zones/neighborhoods
 - **Platform**: 45% iOS / 35% Android / 20% Web
 - **Random Seed**: 42 (for reproducibility)
 
 All configuration is in `config.py`.
+
+### User Activity Segments
+Users are assigned to segments that control their ordering behavior, creating realistic engagement metrics (~50% ever-order rate, ~20% monthly active rate):
+
+| Segment | % of Users | Ever Orders | Monthly Active | Orders/Month |
+|---------|-----------|-------------|----------------|--------------|
+| `power_user` | 5% | 100% | 80% | 8-15 |
+| `regular` | 15% | 95% | 50% | 3-6 |
+| `casual` | 30% | 70% | 25% | 1-3 |
+| `rare` | 50% | 25% | 5% | 1-2 |
+
+Configure in `config.py` via `USER_SEGMENTS`.
 
 ## Project Structure
 ```
@@ -67,7 +79,7 @@ mxfood/
 | Table | Description |
 |-------|-------------|
 | `zones.csv` | Delivery zones/neighborhoods |
-| `users.csv` | User accounts (first_name, last_name, email, phone, zone_id, acquisition_channel, platform) |
+| `users.csv` | User accounts (first_name, last_name, email, phone, zone_id, acquisition_channel, platform, segment, will_order) |
 | `restaurants.csv` | Restaurant partners |
 | `product_categories.csv` | Product categories |
 | `product_subcategories.csv` | Product subcategories |
