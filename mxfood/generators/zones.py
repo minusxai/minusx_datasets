@@ -14,32 +14,24 @@ class ZoneGenerator(BaseGenerator):
 
     def __init__(self, output_dir: str = "output", seed: int = None,
                  data_store: DataStore = None):
-        """Initialize the zone generator.
-
-        Args:
-            output_dir: Directory to save output files
-            seed: Random seed
-            data_store: Shared data store
-        """
         super().__init__(output_dir, seed)
         self.data_store = data_store
 
     def generate(self) -> pd.DataFrame:
-        """Generate zone data.
-
-        Returns:
-            DataFrame with zone data
-        """
+        """Generate zone data with city, state, and launch_month."""
         zones = []
 
         for i, config in enumerate(ZONE_CONFIGS):
             zone = {
                 "zone_id": generate_id("zone", i + 1, 3),
                 "zone_name": config["name"],
+                "city": config.get("city", "San Francisco"),
+                "state": "CA",
                 "avg_delivery_time_mins": config["avg_delivery_time"],
                 "surge_multiplier": config["surge_multiplier"],
                 "lat_center": config["lat"],
-                "lng_center": config["lng"]
+                "lng_center": config["lng"],
+                "launch_month": config.get("launch_month", 1),
             }
             zones.append(zone)
 

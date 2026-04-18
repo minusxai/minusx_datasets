@@ -21,13 +21,25 @@ TIMESTAMP_COLUMNS = {
     "picked_up_at",
     "delivered_at",
     "resolved_at",
-    "date",  # ad_spend date column
+    "sent_at",
+    "opened_at",
+    "converted_at",
+    "closed_at",
 }
 
 # Columns that should be treated as dates (not timestamps)
 DATE_COLUMNS = {
     "start_date",
     "end_date",
+    "date",
+    "hire_date",
+    "termination_date",
+    "shift_date",
+    "order_date",
+    "issued_date",
+    "due_date",
+    "paid_date",
+    "month",
 }
 
 
