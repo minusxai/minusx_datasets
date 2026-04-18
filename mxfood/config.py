@@ -4,7 +4,7 @@ from datetime import datetime
 
 # Timeline
 START_DATE = datetime(2024, 1, 1)
-END_DATE = datetime(2025, 12, 31)
+END_DATE = datetime(2026, 4, 15)
 
 # Entity counts
 NUM_USERS = 30000
