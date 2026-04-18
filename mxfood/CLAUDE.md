@@ -17,9 +17,11 @@ uv run python generate_dataset.py --clear
 # Validate existing dataset only
 uv run python generate_dataset.py --validate-only
 
-# Import to DuckDB
+# Import to DuckDB (always replaces existing db)
 uv run python import_to_duckdb.py
-uv run python import_to_duckdb.py --overwrite  # replace existing db
+
+# Export to Parquet (one file per table, zstd compressed, clears dir first)
+uv run python import_to_duckdb.py --to-parquet parquet_output
 ```
 
 ## Configuration Parameters

@@ -86,6 +86,40 @@ def import_csv_to_duckdb(con: duckdb.DuckDBPyConnection, csv_path: str, table_na
                 print(f"    Warning: Could not convert {col_name} to {target_type}: {e}")
 
 
+def export_to_parquet(db_path: str, parquet_dir: str) -> int:
+    """Export all tables from DuckDB to Parquet files."""
+    if not os.path.exists(db_path):
+        print(f"Error: Database '{db_path}' does not exist. Run import first.")
+        return 1
+
+    import shutil
+    if os.path.exists(parquet_dir):
+        shutil.rmtree(parquet_dir)
+    os.makedirs(parquet_dir)
+
+    con = duckdb.connect(db_path, read_only=True)
+    tables = con.execute("SHOW TABLES").fetchall()
+
+    print(f"Exporting {len(tables)} tables to {parquet_dir}/")
+    print("-" * 50)
+
+    total_rows = 0
+    for (table_name,) in tables:
+        parquet_path = os.path.join(parquet_dir, f"{table_name}.parquet")
+        con.execute(f"COPY {table_name} TO '{parquet_path}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        row_count = con.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        size_mb = os.path.getsize(parquet_path) / (1024 * 1024)
+        print(f"  ✓ {table_name:<30} {row_count:>10,} rows  ({size_mb:.1f} MB)")
+        total_rows += row_count
+
+    print("-" * 50)
+    print(f"Total: {len(tables)} tables, {total_rows:,} rows")
+    print(f"Parquet files saved to: {os.path.abspath(parquet_dir)}")
+
+    con.close()
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Import generated CSVs into a DuckDB database"
@@ -101,25 +135,24 @@ def main():
         help="Output DuckDB file (default: mxfood.duckdb)"
     )
     parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Overwrite existing database file"
+        "--to-parquet",
+        metavar="DIR",
+        help="Export all tables from DuckDB to Parquet files in the given directory"
     )
 
     args = parser.parse_args()
+
+    # Parquet export mode
+    if args.to_parquet:
+        return export_to_parquet(args.output, args.to_parquet)
 
     # Check input directory
     if not os.path.exists(args.input):
         print(f"Error: Input directory '{args.input}' does not exist")
         return 1
 
-    # Check if output exists
-    if os.path.exists(args.output) and not args.overwrite:
-        print(f"Error: Output file '{args.output}' already exists. Use --overwrite to replace.")
-        return 1
-
-    # Remove existing file if overwriting
-    if os.path.exists(args.output) and args.overwrite:
+    # Always replace existing DB
+    if os.path.exists(args.output):
         os.remove(args.output)
 
     # Get CSV files
