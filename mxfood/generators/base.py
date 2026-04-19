@@ -1,5 +1,6 @@
 """Base generator class."""
 
+import csv
 import os
 import random
 from abc import ABC, abstractmethod
@@ -52,7 +53,7 @@ class BaseGenerator(ABC):
             Full path to saved file
         """
         filepath = os.path.join(self.output_dir, filename)
-        df.to_csv(filepath, index=False)
+        df.to_csv(filepath, index=False, quoting=csv.QUOTE_NONNUMERIC)
         print(f"Saved {len(df)} rows to {filepath}")
         return filepath
 

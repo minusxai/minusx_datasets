@@ -1,6 +1,7 @@
 """Driver and delivery generators."""
 
 import random
+import math
 import pandas as pd
 import numpy as np
 from datetime import timedelta
@@ -18,30 +19,36 @@ from models.distributions import choose_weighted, RatingDistribution
 from generators.base import BaseGenerator, DataStore
 
 
+def _haversine_km(lat1, lng1, lat2, lng2):
+    """Vectorized haversine distance in km."""
+    R = 6371
+    dlat = np.radians(lat2 - lat1)
+    dlng = np.radians(lng2 - lng1)
+    a = np.sin(dlat / 2) ** 2 + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlng / 2) ** 2
+    c = 2 * np.arcsin(np.sqrt(a))
+    return R * c
+
+
 class LogisticsGenerator(BaseGenerator):
     """Generator for drivers and deliveries."""
 
     def __init__(self, output_dir: str = "output", seed: int = None,
                  data_store: DataStore = None):
-        """Initialize the logistics generator.
-
-        Args:
-            output_dir: Directory to save output files
-            seed: Random seed
-            data_store: Shared data store
-        """
         super().__init__(output_dir, seed)
         self.data_store = data_store
         self.rating_dist = RatingDistribution(min_rating=3.5, max_rating=5.0, mean=4.5, std=0.4)
 
     def generate_drivers(self) -> pd.DataFrame:
-        """Generate driver data.
-
-        Returns:
-            DataFrame with driver data
-        """
+        """Generate driver data."""
         drivers = []
         zone_ids = self._get_zone_ids()
+        zones_df = self.data_store.get("zones") if self.data_store else None
+        zone_launch_months = {}
+        if zones_df is not None:
+            for _, z in zones_df.iterrows():
+                zone_launch_months[z["zone_id"]] = z.get("launch_month", 1)
+
+        sf_zone_ids = [zid for zid in zone_ids if zone_launch_months.get(zid, 1) == 1]
 
         for i in range(NUM_DRIVERS):
             driver_id = generate_id("drv", i + 1)
@@ -50,19 +57,15 @@ class LogisticsGenerator(BaseGenerator):
             if random.random() < 0.7:
                 created_at = START_DATE + timedelta(days=random.randint(-14, 30))
                 created_at = max(START_DATE, created_at)
+                zone_id = random.choice(sf_zone_ids) if sf_zone_ids else random.choice(zone_ids)
             else:
                 created_at = TimeUtils.random_datetime_between(START_DATE, END_DATE)
+                month_num = (created_at.year - START_DATE.year) * 12 + (created_at.month - START_DATE.month) + 1
+                eligible_zones = [zid for zid in zone_ids if zone_launch_months.get(zid, 1) <= month_num]
+                zone_id = random.choice(eligible_zones) if eligible_zones else random.choice(zone_ids)
 
-            # Select primary zone
-            zone_id = random.choice(zone_ids) if zone_ids else None
-
-            # Select vehicle type
             vehicle_type = choose_weighted(VEHICLE_TYPES)
-
-            # Generate rating
             rating = self.rating_dist.sample()
-
-            # Active status (90% active)
             is_active = random.random() < 0.90
 
             driver = {
@@ -84,28 +87,24 @@ class LogisticsGenerator(BaseGenerator):
         return df
 
     def generate_deliveries(self) -> pd.DataFrame:
-        """Generate delivery data (vectorized).
-
-        Returns:
-            DataFrame with delivery data
-        """
+        """Generate delivery data with distance_km (vectorized)."""
         orders_df = self.data_store.get("orders") if self.data_store else None
+        restaurants_df = self.data_store.get("restaurants") if self.data_store else None
+        users_df = self.data_store.get("users") if self.data_store else None
+
         if orders_df is None:
             return pd.DataFrame()
 
-        # Only completed orders have full delivery data
         completed = orders_df[orders_df["status"] == "completed"].copy()
 
         if completed.empty:
             return pd.DataFrame()
 
         n = len(completed)
-
-        # Convert timestamps
         completed["order_time"] = pd.to_datetime(completed["created_at"])
 
         # Handle missing actual_mins
-        actual_mins = completed["actual_delivery_mins"].values.copy()
+        actual_mins = completed["actual_delivery_mins"].values.copy().astype(float)
         missing_mask = pd.isna(actual_mins)
         actual_mins[missing_mask] = (
             completed.loc[missing_mask, "estimated_delivery_mins"].values +
@@ -113,24 +112,22 @@ class LogisticsGenerator(BaseGenerator):
         )
 
         # Generate random values
-        assign_delays = np.random.randint(1, 6, size=n)  # 1-5 minutes
+        assign_delays = np.random.randint(1, 6, size=n)
         pickup_progress = np.random.uniform(0.3, 0.5, size=n)
         pickup_mins = (actual_mins * pickup_progress).astype(int)
 
-        # Calculate timestamps
         order_times = completed["order_time"].values
         assigned_at = order_times + pd.to_timedelta(assign_delays, unit='m')
         picked_up_at = order_times + pd.to_timedelta(pickup_mins, unit='m')
         delivered_at = order_times + pd.to_timedelta(actual_mins, unit='m')
 
-        # Generate ratings (70% leave rating)
+        # Generate ratings
         estimated_mins = completed["estimated_delivery_mins"].values
         time_diff = actual_mins - estimated_mins
 
         rating_random = np.random.random(n)
         leaves_rating = rating_random < 0.70
 
-        # Rating based on time performance
         ratings = np.full(n, np.nan)
         early_mask = leaves_rating & (time_diff <= 0)
         slight_late_mask = leaves_rating & (time_diff > 0) & (time_diff <= 5)
@@ -140,7 +137,7 @@ class LogisticsGenerator(BaseGenerator):
         ratings[slight_late_mask] = np.random.choice([3, 4, 5], size=slight_late_mask.sum(), p=[0.2, 0.5, 0.3])
         ratings[late_mask] = np.random.choice([1, 2, 3, 4], size=late_mask.sum(), p=[0.1, 0.2, 0.4, 0.3])
 
-        # Generate notes (10% have notes)
+        # Generate notes
         notes_options = [
             "Left at door", "Handed to customer", "Left with doorman",
             "Customer met outside", "Placed in lobby", "Ring doorbell",
@@ -149,7 +146,20 @@ class LogisticsGenerator(BaseGenerator):
         has_notes = np.random.random(n) < 0.10
         notes = np.where(has_notes, np.random.choice(notes_options, size=n), None)
 
-        # Build DataFrame
+        # Compute distance_km using restaurant and user lat/lng
+        distance_km = np.full(n, 3.0)  # Default 3km
+        if restaurants_df is not None and users_df is not None:
+            rest_coords = restaurants_df.set_index("restaurant_id")[["lat", "lng"]].to_dict("index")
+            user_coords = users_df.set_index("user_id")[["lat", "lng"]].to_dict("index")
+
+            rest_lats = np.array([rest_coords.get(rid, {}).get("lat", 37.77) for rid in completed["restaurant_id"].values])
+            rest_lngs = np.array([rest_coords.get(rid, {}).get("lng", -122.42) for rid in completed["restaurant_id"].values])
+            user_lats = np.array([user_coords.get(uid, {}).get("lat", 37.77) for uid in completed["user_id"].values])
+            user_lngs = np.array([user_coords.get(uid, {}).get("lng", -122.42) for uid in completed["user_id"].values])
+
+            distance_km = _haversine_km(rest_lats, rest_lngs, user_lats, user_lngs) * 1.3  # Road factor
+            distance_km = np.round(distance_km, 2)
+
         df = pd.DataFrame({
             "delivery_id": [generate_id("del", i + 1) for i in range(n)],
             "order_id": completed["order_id"].values,
@@ -158,10 +168,10 @@ class LogisticsGenerator(BaseGenerator):
             "picked_up_at": pd.Series(picked_up_at).dt.strftime("%Y-%m-%d %H:%M:%S"),
             "delivered_at": pd.Series(delivered_at).dt.strftime("%Y-%m-%d %H:%M:%S"),
             "delivery_rating": ratings,
-            "delivery_notes": notes
+            "delivery_notes": notes,
+            "distance_km": distance_km,
         })
 
-        # Convert rating to nullable int
         df["delivery_rating"] = df["delivery_rating"].astype("Int64")
 
         if self.data_store:
@@ -176,11 +186,6 @@ class LogisticsGenerator(BaseGenerator):
         return []
 
     def generate(self) -> Dict[str, pd.DataFrame]:
-        """Generate all logistics data.
-
-        Returns:
-            Dictionary with drivers and deliveries DataFrames
-        """
+        """Generate all logistics data."""
         drivers = self.generate_drivers()
-        # Note: deliveries should be generated after orders
         return {"drivers": drivers}

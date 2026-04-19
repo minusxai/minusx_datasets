@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pandas as pd
 import numpy as np
 
-from config import RANDOM_SEED, START_DATE, END_DATE, NUM_USERS, NUM_RESTAURANTS, NUM_DRIVERS
+from config import RANDOM_SEED, START_DATE, END_DATE, NUM_USERS, NUM_RESTAURANTS, NUM_DRIVERS, NUM_ZONES
 from generators.base import DataStore
 from generators.zones import ZoneGenerator
 from generators.users import UserGenerator
@@ -25,6 +25,12 @@ from generators.subscriptions import SubscriptionGenerator
 from generators.promotions import PromoGenerator
 from generators.events import EventGenerator
 from generators.support import SupportGenerator
+from generators.weather import WeatherGenerator
+from generators.finance import FinanceGenerator
+from generators.b2b import B2BGenerator
+from generators.ops import OpsGenerator
+from generators.reviews import ReviewGenerator
+from generators.notifications import NotificationGenerator
 
 
 def csv_exists(output_dir: str, filename: str) -> bool:
@@ -44,65 +50,72 @@ def load_existing_csv(output_dir: str, filename: str, data_store: DataStore, key
 def print_header():
     """Print script header."""
     print("=" * 60)
-    print("  Food Delivery Synthetic Dataset Generator")
+    print("  MXFood Synthetic Dataset Generator (Enriched)")
     print("=" * 60)
     print(f"  Timeline: {START_DATE.strftime('%Y-%m-%d')} to {END_DATE.strftime('%Y-%m-%d')}")
     print(f"  Users: {NUM_USERS:,}")
     print(f"  Restaurants: {NUM_RESTAURANTS:,}")
     print(f"  Drivers: {NUM_DRIVERS:,}")
+    print(f"  Zones: {NUM_ZONES} (SF + South Bay)")
     print(f"  Random Seed: {RANDOM_SEED}")
     print("=" * 60)
     print()
 
 
 def generate_dataset(output_dir: str = "output", seed: int = None, clear: bool = False):
-    """Generate the complete dataset.
-
-    Args:
-        output_dir: Directory to save output files
-        seed: Random seed for reproducibility
-        clear: Whether to clear the output directory first
-    """
+    """Generate the complete dataset."""
     start_time = time.time()
 
-    # Set random seed
     seed = seed or RANDOM_SEED
     np.random.seed(seed)
 
-    # Optionally clear and recreate output directory
     if clear and os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Initialize data store for sharing data between generators
     data_store = DataStore()
 
+    # ================================================================
+    # Phase 1: Foundation
+    # ================================================================
     print("Phase 1: Foundation")
     print("-" * 40)
 
-    # Generate zones
+    # Zones (SF + South Bay)
     print("  Zones...")
     zone_gen = ZoneGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "zones.csv"):
-        zones_df = load_existing_csv(output_dir, "zones.csv", data_store, "zones")
+        load_existing_csv(output_dir, "zones.csv", data_store, "zones")
     else:
         zones_df = zone_gen.generate_and_save("zones.csv")
         print(f"    ✓ Generated {len(zones_df)} zones")
 
+    # Weather (standalone)
+    print("  Weather...")
+    weather_gen = WeatherGenerator(output_dir, seed, data_store)
+    if csv_exists(output_dir, "weather.csv"):
+        load_existing_csv(output_dir, "weather.csv", data_store, "weather")
+    else:
+        weather_df = weather_gen.generate_and_save("weather.csv")
+        print(f"    ✓ Generated {len(weather_df)} weather records")
+
+    # ================================================================
+    # Phase 2: Core Entities
+    # ================================================================
     print()
     print("Phase 2: Core Entities")
     print("-" * 40)
 
-    # Generate restaurants
+    # Restaurants (with lat/lng)
     print("  Restaurants...")
     restaurant_gen = RestaurantGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "restaurants.csv"):
-        restaurants_df = load_existing_csv(output_dir, "restaurants.csv", data_store, "restaurants")
+        load_existing_csv(output_dir, "restaurants.csv", data_store, "restaurants")
     else:
         restaurants_df = restaurant_gen.generate_and_save("restaurants.csv")
         print(f"    ✓ Generated {len(restaurants_df)} restaurants")
 
-    # Generate product categories, subcategories, products
+    # Products
     print("  Products...")
     product_gen = ProductGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "products.csv"):
@@ -114,34 +127,34 @@ def generate_dataset(output_dir: str = "output", seed: int = None, clear: bool =
         product_gen.save(product_data["categories"], "product_categories.csv")
         product_gen.save(product_data["subcategories"], "product_subcategories.csv")
         product_gen.save(product_data["products"], "products.csv")
-        print(f"    ✓ Generated {len(product_data['categories'])} categories")
-        print(f"    ✓ Generated {len(product_data['subcategories'])} subcategories")
-        print(f"    ✓ Generated {len(product_data['products'])} products")
+        print(f"    ✓ Generated {len(product_data['categories'])} categories, {len(product_data['subcategories'])} subcategories, {len(product_data['products'])} products")
 
-    # Generate users
+    # Users (with lat/lng, behavior_type, work_zone_id)
     print("  Users...")
     user_gen = UserGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "users.csv"):
-        users_df = load_existing_csv(output_dir, "users.csv", data_store, "users")
+        load_existing_csv(output_dir, "users.csv", data_store, "users")
     else:
         users_df = user_gen.generate_and_save("users.csv")
         print(f"    ✓ Generated {len(users_df)} users")
 
-    # Generate drivers
+    # Drivers
     print("  Drivers...")
     logistics_gen = LogisticsGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "drivers.csv"):
-        drivers_df = load_existing_csv(output_dir, "drivers.csv", data_store, "drivers")
+        load_existing_csv(output_dir, "drivers.csv", data_store, "drivers")
     else:
         drivers_df = logistics_gen.generate_drivers()
         logistics_gen.save(drivers_df, "drivers.csv")
         print(f"    ✓ Generated {len(drivers_df)} drivers")
 
+    # ================================================================
+    # Phase 3: Marketing
+    # ================================================================
     print()
     print("Phase 3: Marketing")
     print("-" * 40)
 
-    # Generate marketing data
     print("  Marketing channels and campaigns...")
     marketing_gen = MarketingGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "marketing_channels.csv"):
@@ -155,43 +168,45 @@ def generate_dataset(output_dir: str = "output", seed: int = None, clear: bool =
         marketing_gen.save(marketing_data["campaigns"], "ad_campaigns.csv")
         marketing_gen.save(marketing_data["ad_spend"], "ad_spend.csv")
         marketing_gen.save(marketing_data["attribution"], "attribution.csv")
-        print(f"    ✓ Generated {len(marketing_data['channels'])} channels")
-        print(f"    ✓ Generated {len(marketing_data['campaigns'])} campaigns")
-        print(f"    ✓ Generated {len(marketing_data['ad_spend'])} ad spend records")
-        print(f"    ✓ Generated {len(marketing_data['attribution'])} attribution records")
+        print(f"    ✓ Generated marketing data")
 
+    # ================================================================
+    # Phase 4: Transactions
+    # ================================================================
     print()
     print("Phase 4: Transactions")
     print("-" * 40)
 
-    # Generate orders
+    # Orders (with payment_method, is_reorder, behavior-driven)
     print("  Orders...")
     order_gen = OrderGenerator(output_dir, seed, data_store)
     orders_existed = csv_exists(output_dir, "orders.csv")
     if orders_existed:
-        orders_df = load_existing_csv(output_dir, "orders.csv", data_store, "orders")
-        order_items_df = load_existing_csv(output_dir, "order_items.csv", data_store, "order_items")
+        load_existing_csv(output_dir, "orders.csv", data_store, "orders")
+        load_existing_csv(output_dir, "order_items.csv", data_store, "order_items")
     else:
         orders_df, order_items_df = order_gen.generate()
         order_gen.save(orders_df, "orders.csv")
         order_gen.save(order_items_df, "order_items.csv")
-        print(f"    ✓ Generated {len(orders_df)} orders")
-        print(f"    ✓ Generated {len(order_items_df)} order items")
+        print(f"    ✓ Generated {len(orders_df)} orders, {len(order_items_df)} order items")
 
-    # Generate deliveries
+    # Deliveries (with distance_km)
     print("  Deliveries...")
     if csv_exists(output_dir, "deliveries.csv"):
-        deliveries_df = load_existing_csv(output_dir, "deliveries.csv", data_store, "deliveries")
+        load_existing_csv(output_dir, "deliveries.csv", data_store, "deliveries")
     else:
         deliveries_df = logistics_gen.generate_deliveries()
         logistics_gen.save(deliveries_df, "deliveries.csv")
         print(f"    ✓ Generated {len(deliveries_df)} deliveries")
 
+    # ================================================================
+    # Phase 5: Engagement
+    # ================================================================
     print()
     print("Phase 5: Engagement")
     print("-" * 40)
 
-    # Generate subscriptions
+    # Subscriptions
     print("  Subscriptions...")
     subscription_gen = SubscriptionGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "subscription_plans.csv"):
@@ -201,16 +216,13 @@ def generate_dataset(output_dir: str = "output", seed: int = None, clear: bool =
         subscription_data = subscription_gen.generate()
         subscription_gen.save(subscription_data["plans"], "subscription_plans.csv")
         subscription_gen.save(subscription_data["user_subscriptions"], "user_subscriptions.csv")
-        print(f"    ✓ Generated {len(subscription_data['plans'])} subscription plans")
-        print(f"    ✓ Generated {len(subscription_data['user_subscriptions'])} user subscriptions")
+        print(f"    ✓ Generated subscription data")
 
-    # Update orders with subscription benefits (only if orders were freshly generated)
     if not orders_existed:
         print("  Applying subscription benefits to orders...")
         subscription_gen.update_orders_with_subscription_benefits()
-        print("    ✓ Updated orders with subscription benefits")
 
-    # Generate promo codes and usage
+    # Promo codes
     print("  Promo codes...")
     promo_gen = PromoGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "promo_codes.csv"):
@@ -220,37 +232,135 @@ def generate_dataset(output_dir: str = "output", seed: int = None, clear: bool =
         promo_data = promo_gen.generate()
         promo_gen.save(promo_data["promo_codes"], "promo_codes.csv")
         promo_gen.save(promo_data["promo_usage"], "promo_usage.csv")
-        print(f"    ✓ Generated {len(promo_data['promo_codes'])} promo codes")
-        print(f"    ✓ Generated {len(promo_data['promo_usage'])} promo usages")
+        print(f"    ✓ Generated promo data")
 
-        # Re-save orders with promo updates (only if orders were freshly generated)
         if not orders_existed:
             orders_df = data_store.get("orders")
             order_gen.save(orders_df, "orders.csv")
 
-    # Generate events
+    # Events
     print("  Events...")
     event_gen = EventGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "events.csv"):
-        events_df = load_existing_csv(output_dir, "events.csv", data_store, "events")
+        load_existing_csv(output_dir, "events.csv", data_store, "events")
     else:
         events_df = event_gen.generate_and_save("events.csv")
         print(f"    ✓ Generated {len(events_df)} events")
 
-    # Generate support tickets
+    # Support tickets
     print("  Support tickets...")
     support_gen = SupportGenerator(output_dir, seed, data_store)
     if csv_exists(output_dir, "support_tickets.csv"):
-        tickets_df = load_existing_csv(output_dir, "support_tickets.csv", data_store, "support_tickets")
+        load_existing_csv(output_dir, "support_tickets.csv", data_store, "support_tickets")
     else:
         tickets_df = support_gen.generate_and_save("support_tickets.csv")
         print(f"    ✓ Generated {len(tickets_df)} support tickets")
 
+    # ================================================================
+    # Phase 6: Finance (foundation)
+    # ================================================================
     print()
-    print("Phase 6: Finalization")
+    print("Phase 6: Finance")
     print("-" * 40)
 
-    # Generate summary statistics
+    finance_gen = FinanceGenerator(output_dir, seed, data_store)
+
+    print("  Departments & Employees...")
+    if csv_exists(output_dir, "departments.csv"):
+        load_existing_csv(output_dir, "departments.csv", data_store, "departments")
+        load_existing_csv(output_dir, "employees.csv", data_store, "employees")
+    else:
+        finance_data = finance_gen.generate()
+        finance_gen.save(finance_data["departments"], "departments.csv")
+        finance_gen.save(finance_data["employees"], "employees.csv")
+        print(f"    ✓ Generated {len(finance_data['departments'])} departments, {len(finance_data['employees'])} employees")
+
+    # ================================================================
+    # Phase 7: B2B / Corporate Catering
+    # ================================================================
+    print()
+    print("Phase 7: B2B / Corporate Catering")
+    print("-" * 40)
+
+    b2b_gen = B2BGenerator(output_dir, seed, data_store)
+    if csv_exists(output_dir, "business_accounts.csv"):
+        load_existing_csv(output_dir, "business_accounts.csv", data_store, "business_accounts")
+        load_existing_csv(output_dir, "b2b_pipeline.csv", data_store, "b2b_pipeline")
+        load_existing_csv(output_dir, "b2b_contracts.csv", data_store, "b2b_contracts")
+        load_existing_csv(output_dir, "catering_orders.csv", data_store, "catering_orders")
+        load_existing_csv(output_dir, "b2b_invoices.csv", data_store, "b2b_invoices")
+    else:
+        b2b_data = b2b_gen.generate()
+        for table_name, df in b2b_data.items():
+            b2b_gen.save(df, f"{table_name}.csv")
+            print(f"    ✓ Generated {len(df)} {table_name}")
+
+    # ================================================================
+    # Phase 8: Ops Enrichment
+    # ================================================================
+    print()
+    print("Phase 8: Ops Enrichment")
+    print("-" * 40)
+
+    ops_gen = OpsGenerator(output_dir, seed, data_store)
+    if csv_exists(output_dir, "driver_shifts.csv"):
+        load_existing_csv(output_dir, "driver_shifts.csv", data_store, "driver_shifts")
+        load_existing_csv(output_dir, "incidents.csv", data_store, "incidents")
+    else:
+        ops_data = ops_gen.generate()
+        for table_name, df in ops_data.items():
+            ops_gen.save(df, f"{table_name}.csv")
+            print(f"    ✓ Generated {len(df)} {table_name}")
+
+    # ================================================================
+    # Phase 9: Consumer Insights
+    # ================================================================
+    print()
+    print("Phase 9: Consumer Insights")
+    print("-" * 40)
+
+    # Reviews
+    print("  Reviews...")
+    review_gen = ReviewGenerator(output_dir, seed, data_store)
+    if csv_exists(output_dir, "reviews.csv"):
+        load_existing_csv(output_dir, "reviews.csv", data_store, "reviews")
+    else:
+        reviews_df = review_gen.generate_and_save("reviews.csv")
+        print(f"    ✓ Generated {len(reviews_df)} reviews")
+
+    # Notifications
+    print("  Notifications...")
+    notif_gen = NotificationGenerator(output_dir, seed, data_store)
+    if csv_exists(output_dir, "notifications.csv"):
+        load_existing_csv(output_dir, "notifications.csv", data_store, "notifications")
+    else:
+        notifs_df = notif_gen.generate_and_save("notifications.csv")
+        print(f"    ✓ Generated {len(notifs_df)} notifications")
+
+    # ================================================================
+    # Phase 10: Finance Derived Data
+    # ================================================================
+    print()
+    print("Phase 10: Finance (Derived)")
+    print("-" * 40)
+
+    if csv_exists(output_dir, "budgets.csv"):
+        load_existing_csv(output_dir, "budgets.csv", data_store, "budgets")
+        load_existing_csv(output_dir, "expenses.csv", data_store, "expenses")
+        load_existing_csv(output_dir, "revenue_lines.csv", data_store, "revenue_lines")
+    else:
+        derived = finance_gen.generate_derived()
+        for table_name, df in derived.items():
+            finance_gen.save(df, f"{table_name}.csv")
+            print(f"    ✓ Generated {len(df)} {table_name}")
+
+    # ================================================================
+    # Phase 11: Finalization
+    # ================================================================
+    print()
+    print("Phase 11: Finalization")
+    print("-" * 40)
+
     print("  Generating summary statistics...")
     generate_summary(data_store, output_dir)
 
@@ -265,14 +375,10 @@ def generate_dataset(output_dir: str = "output", seed: int = None, clear: bool =
 
 def generate_summary(data_store: DataStore, output_dir: str):
     """Generate summary statistics for the dataset."""
-    summary = {
-        "table": [],
-        "rows": [],
-        "description": []
-    }
+    summary = {"table": [], "rows": [], "description": []}
 
     tables = [
-        ("zones", "Delivery zones/neighborhoods"),
+        ("zones", "Delivery zones (SF + South Bay)"),
         ("users", "User accounts"),
         ("restaurants", "Restaurant partners"),
         ("products", "Menu items"),
@@ -289,7 +395,22 @@ def generate_summary(data_store: DataStore, output_dir: str):
         ("ad_spend", "Daily ad spend records"),
         ("attribution", "User acquisition attribution"),
         ("events", "User behavior events"),
-        ("support_tickets", "Customer support tickets")
+        ("support_tickets", "Customer support tickets"),
+        ("weather", "Hourly weather per zone"),
+        ("departments", "Company departments"),
+        ("employees", "Employee records"),
+        ("budgets", "Monthly budget plans"),
+        ("expenses", "Expense records"),
+        ("revenue_lines", "Revenue line items"),
+        ("business_accounts", "B2B corporate accounts"),
+        ("b2b_pipeline", "B2B deal pipeline"),
+        ("b2b_contracts", "B2B contracts"),
+        ("catering_orders", "B2B catering orders"),
+        ("b2b_invoices", "B2B invoices"),
+        ("driver_shifts", "Driver shift records"),
+        ("incidents", "Delivery incidents"),
+        ("reviews", "Order reviews & ratings"),
+        ("notifications", "Push/email/sms notifications"),
     ]
 
     for table_name, description in tables:
@@ -303,8 +424,6 @@ def generate_summary(data_store: DataStore, output_dir: str):
     summary_df.to_csv(os.path.join(output_dir, "summary.csv"), index=False)
 
     print("    ✓ Generated summary.csv")
-
-    # Print summary
     print()
     print("  Dataset Summary:")
     print("  " + "-" * 50)
@@ -319,8 +438,6 @@ def validate_dataset(output_dir: str):
     print("-" * 40)
 
     errors = []
-
-    # Load all tables
     tables = {}
     csv_files = [f for f in os.listdir(output_dir) if f.endswith('.csv') and f != 'summary.csv']
 
@@ -328,7 +445,7 @@ def validate_dataset(output_dir: str):
         table_name = csv_file.replace('.csv', '')
         tables[table_name] = pd.read_csv(os.path.join(output_dir, csv_file))
 
-    # Validate foreign key relationships
+    # FK checks
     fk_checks = [
         ("users", "zone_id", "zones", "zone_id"),
         ("restaurants", "zone_id", "zones", "zone_id"),
@@ -353,6 +470,24 @@ def validate_dataset(output_dir: str):
         ("ad_spend", "campaign_id", "ad_campaigns", "campaign_id"),
         ("events", "user_id", "users", "user_id"),
         ("support_tickets", "user_id", "users", "user_id"),
+        # New enrichment FK checks
+        ("reviews", "order_id", "orders", "order_id"),
+        ("reviews", "user_id", "users", "user_id"),
+        ("reviews", "restaurant_id", "restaurants", "restaurant_id"),
+        ("weather", "zone_id", "zones", "zone_id"),
+        ("notifications", "user_id", "users", "user_id"),
+        ("employees", "department_id", "departments", "department_id"),
+        ("budgets", "department_id", "departments", "department_id"),
+        ("expenses", "department_id", "departments", "department_id"),
+        ("business_accounts", "zone_id", "zones", "zone_id"),
+        ("catering_orders", "account_id", "business_accounts", "account_id"),
+        ("catering_orders", "restaurant_id", "restaurants", "restaurant_id"),
+        ("b2b_pipeline", "account_id", "business_accounts", "account_id"),
+        ("b2b_invoices", "account_id", "business_accounts", "account_id"),
+        ("incidents", "delivery_id", "deliveries", "delivery_id"),
+        ("incidents", "driver_id", "drivers", "driver_id"),
+        ("driver_shifts", "driver_id", "drivers", "driver_id"),
+        ("driver_shifts", "zone_id", "zones", "zone_id"),
     ]
 
     for child_table, child_col, parent_table, parent_col in fk_checks:
@@ -365,7 +500,6 @@ def validate_dataset(output_dir: str):
         if child_col not in child_df.columns or parent_col not in parent_df.columns:
             continue
 
-        # Get non-null child values
         child_values = set(child_df[child_df[child_col].notna()][child_col])
         parent_values = set(parent_df[parent_col])
 
@@ -380,17 +514,14 @@ def validate_dataset(output_dir: str):
     else:
         print("  ✓ All foreign key relationships valid")
 
-    # Check for expected patterns
+    # Check growth pattern
     orders_df = tables.get("orders")
     if orders_df is not None:
-        # Check growth pattern
         orders_df["created_at"] = pd.to_datetime(orders_df["created_at"])
         orders_df["month"] = orders_df["created_at"].dt.to_period("M")
         monthly_orders = orders_df.groupby("month").size()
-
         print(f"  ✓ Order growth: {monthly_orders.iloc[0]} (month 1) -> {monthly_orders.iloc[-1]} (month {len(monthly_orders)})")
 
-        # Check completion rate
         completion_rate = (orders_df["status"] == "completed").mean()
         print(f"  ✓ Order completion rate: {completion_rate:.1%}")
 
@@ -399,31 +530,11 @@ def validate_dataset(output_dir: str):
 
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Generate a synthetic food delivery dataset"
-    )
-    parser.add_argument(
-        "-o", "--output",
-        default="output",
-        help="Output directory for CSV files (default: output)"
-    )
-    parser.add_argument(
-        "-s", "--seed",
-        type=int,
-        default=RANDOM_SEED,
-        help=f"Random seed for reproducibility (default: {RANDOM_SEED})"
-    )
-    parser.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Only validate existing dataset, don't generate"
-    )
-    parser.add_argument(
-        "--clear",
-        action="store_true",
-        help="Clear output directory before generating (by default, skips existing CSVs)"
-    )
+    parser = argparse.ArgumentParser(description="Generate a synthetic food delivery dataset")
+    parser.add_argument("-o", "--output", default="output", help="Output directory")
+    parser.add_argument("-s", "--seed", type=int, default=RANDOM_SEED, help="Random seed")
+    parser.add_argument("--validate-only", action="store_true", help="Only validate existing dataset")
+    parser.add_argument("--clear", action="store_true", help="Clear output directory before generating")
 
     args = parser.parse_args()
 

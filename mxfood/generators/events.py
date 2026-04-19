@@ -225,7 +225,7 @@ def _create_event_dict(user_id, session_id, event_name, timestamp, platform, scr
         "event_timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
         "platform": platform,
         "screen_name": screen_name,
-        "properties": json.dumps(properties) if properties else None
+        "properties": json.dumps(properties) if properties else ""
     }
 
 
