@@ -17,9 +17,11 @@ jobs:
         working-directory: mxfood
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12.16'
       - uses: astral-sh/setup-uv@v10.3.1
         with:
           version: '0.13.5'
-          python-version: '3.12.16'
       - run: uv sync --locked
       - run: uv run --no-sync python -m unittest discover -s tests -v
